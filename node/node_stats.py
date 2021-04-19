@@ -111,9 +111,9 @@ def generate_line_stats(fields):
         line.append(item['value'])
     return ' '.join(line)
 
-def fill_local_stats(fields, index):
+def fill_local_stats(fields, index, controller):
     set_field_value(fields, 'index', index)
-    set_field_value(fields, 'node', 'controller')
+    set_field_value(fields, 'node', controller.name)
 
     cpu_percent = psutil.cpu_percent(interval=None)
     set_field_value(fields, 'cpu_percent', cpu_percent)
@@ -232,7 +232,7 @@ def main():
 
         y += 1
         index = 0
-        fill_local_stats(fields, index)
+        fill_local_stats(fields, index, cluster.controller)
 
         with term.location(x, y):
             print(generate_line_stats(fields))

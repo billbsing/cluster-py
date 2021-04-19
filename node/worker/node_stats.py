@@ -20,7 +20,6 @@ class NodeStats(rpyc.Service):
         for name, sensor in temp.items():
             item = sensor[0]
             if item and hasattr(item, 'current'):
-                print(item)
                 result = item.current
         return result
 
