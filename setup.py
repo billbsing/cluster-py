@@ -23,7 +23,9 @@ with open('CHANGELOG.md') as changelog_file:
 
 install_requirements = [
     'blessed',
+    'py-cpuinfo',
     'rpyc',
+    'psutil',
     'pyyaml',
 ]
 

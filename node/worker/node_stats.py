@@ -24,7 +24,24 @@ class NodeStats(rpyc.Service):
                 result = item.current
         return result
 
-    def exposed_get_cpu_info(sefl):
+    def exposed_get_virtual_memory(self):
+        value = psutil.virtual_memory()
+        return {
+            'test': 0.0,
+            'total': value.total, 
+            'available': value.available, 
+            'percent': float(value.percent), 
+            'used': value.used, 
+            'free': value.free, 
+            'active': value.active, 
+            'inactive': value.inactive, 
+            'buffers': value.buffers, 
+            'cached': value.cached, 
+            'shared': value.shared, 
+            'slab': value.slab
+        }
+
+    def exposed_get_cpu_info(self):
         return cpuinfo.get_cpu_info()
 
     def exposed_do_close(self):
