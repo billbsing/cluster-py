@@ -113,7 +113,7 @@ def generate_line_stats(fields):
 
 def fill_local_stats(fields, index, controller):
     set_field_value(fields, 'index', index)
-    set_field_value(fields, 'node', controller.name)
+    set_field_value(fields, 'node', f'*{controller.name}*')
 
     cpu_percent = psutil.cpu_percent(interval=None)
     set_field_value(fields, 'cpu_percent', cpu_percent)
@@ -164,18 +164,19 @@ def show_size_as_text(size):
     :return: the size in bytes, kb, mb e.t.c depending on the quantit of size.
     """
     result = f'{size} Bytes'
-    items = [
-        (BYTES_PER_KB, 'KB'),
-        (math.pow(BYTES_PER_KB, 2), 'MB'),
-        (math.pow(BYTES_PER_KB, 3), 'GB'),
-        (math.pow(BYTES_PER_KB, 4), 'TB'),
+    values = [
+        'KB',
+        'MB',
+        'GB',
+        'TB',
     ]
 
-    for item in items:
-        if size < item[0]:
+    for index in range(len(values)):
+        max_size = math.pow(BYTES_PER_KB, index + 1)
+        if size < max_size: 
             break
-        format_size = size / item[0]
-        result = f'{format_size:.2f} {item[1]}'
+        format_size = size / max_size
+        result = f'{format_size:.2f} {values[index]}'
 
     return result
 
