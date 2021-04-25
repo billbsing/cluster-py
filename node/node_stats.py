@@ -7,6 +7,7 @@ import logging
 import math
 import os
 import psutil
+import rpyc
 import time
 
 from cluster import (
@@ -14,6 +15,7 @@ from cluster import (
     Worker
 )
 
+from threading import Lock
 from blessed import Terminal
 
 BYTES_PER_KB = 1000
@@ -24,6 +26,8 @@ NODE_STATS_PORT = 18880
 NODE_STATS_APP_NAME = 'node_stats.py'
 
 logger = logging.getLogger(__name__)
+terminal = None
+lock = Lock()
 
 fields = {
     'index' : {
@@ -133,30 +137,30 @@ def fill_local_stats(fields, index, controller):
     set_field_value(fields, 'cpu_speed', cpu_info['hz_actual_friendly'])
     set_field_value(fields, 'cpu_brand', cpu_info['brand_raw'])
 
-def fill_worker_stats(fields, index, worker):
+def fill_worker_stats(fields, index, node_name, cpu, memory, temp, cpu_info):
     set_field_value(fields, 'index', index)
-    set_field_value(fields, 'node', worker.node.name)
+    set_field_value(fields, 'node', node_name)
 
-    cpu = worker.connection.root.get_cpu()
     set_field_value(fields, 'cpu_percent', cpu)
 
-    memory = worker.connection.root.get_virtual_memory()
     set_field_value(fields, 'memory_percent', memory['percent'])
     set_field_value(fields, 'memory_total', show_size_as_text(memory['total']))
 
-    try:
-        temp = worker.connection.root.get_temperatures()
-    except:
-        temp = 0.0
-
     set_field_value(fields, 'temperature', temp)
 
-    cpu_info = worker.connection.root.get_cpu_info()
     set_field_value(fields, 'cpu_arch', cpu_info['arch'])
     set_field_value(fields, 'cpu_bits', cpu_info['bits'])
     set_field_value(fields, 'cpu_count', cpu_info['count'])
     set_field_value(fields, 'cpu_speed', cpu_info['hz_actual'])
     set_field_value(fields, 'cpu_brand', cpu_info['brand'])
+
+def worker_update_callback(x, y, index, node_name, cpu, memory, temp, cpu_info):
+    global terminal, lock
+
+    with lock:
+        fill_worker_stats(fields, index, node_name, cpu, memory, temp, cpu_info)
+        with terminal.location(x, y):
+            print(generate_line_stats(fields))
 
 def show_size_as_text(size):
     """
@@ -181,6 +185,8 @@ def show_size_as_text(size):
     return result
 
 def main():
+
+    global terminal, lock
 
     parser = argparse.ArgumentParser(description='Node stats')
 
@@ -214,45 +220,72 @@ def main():
         print(f'cannot find config {args.config} file')
         return
 
-    term = Terminal()
+    terminal = Terminal()
 
     workers = []
+    results = []
+    x = 0
+    y = terminal.height - len(cluster.nodes.keys())  - 3
+    with terminal.location(x, y):
+        print(generate_line_header(fields))
+
+    y += 2
+    index = 1
     for node_name, node in cluster.nodes.items():
         worker = Worker(node, NODE_STATS_WORKER_PATH, NODE_STATS_APP_NAME, NODE_STATS_PORT)
         if not worker.startup(args.restart):
             print(f'cannot connect to node {node.name}')
             return
-        workers.append(worker)
+        # worker_update = rpyc.async_(worker.connection.root.update_start)
+        bgsrv = rpyc.BgServingThread(worker.connection)
+        update = worker.connection.root.update(x, y, index, worker.node.name, worker_update_callback)
+        workers.append({
+            'worker': worker,
+            'update': update
+        })
+        y += 1
+        index += 1
 
     while True:
-        x = 0
-        y = term.height - len(workers)  - 3
+        y = terminal.height - len(workers)  - 2
 
-        with term.location(x, y):
-            print(generate_line_header(fields))
+        # with terminal.location(x, y):
+        #     print(generate_line_header(fields))
 
-        y += 1
+        # y += 1
         index = 0
-        fill_local_stats(fields, index, cluster.controller)
+        with lock:
+            fill_local_stats(fields, index, cluster.controller)
 
-        with term.location(x, y):
-            print(generate_line_stats(fields))
+            with terminal.location(x, y):
+                print(generate_line_stats(fields))
         index += 1
         y += 1
 
+        """
         for worker in workers:
-            fill_worker_stats(fields, index, worker)
+            cpu = worker.connection.root.get_cpu()
+            memory = worker.connection.root.get_virtual_memory()
+            try:
+                temp = worker.connection.root.get_temperatures()
+            except:
+                temp = 0.0
+            cpu_info = worker.connection.root.get_cpu_info()
+            fill_worker_stats(fields, index, cpu, memory, temp, cpu_info)
 
             with term.location(x, y):
                 print(generate_line_stats(fields))
             index += 1
             y += 1
-
-        with term.cbreak(), term.hidden_cursor():
-            inp = term.inkey(1)
+        """
+            
+        with terminal.cbreak(), terminal.hidden_cursor():
+            inp = terminal.inkey(1)
             if inp:
                 break
 
+    for item in workers:
+        item['worker'].connection.root.update_stop()
 
 if __name__ == '__main__':
     main()
