@@ -10,6 +10,8 @@ import psutil
 import rpyc
 import time
 
+from multiprocessing import Process, Queue
+
 from cluster import (
     Cluster,
     Worker
@@ -154,13 +156,33 @@ def fill_worker_stats(fields, index, node_name, cpu, memory, temp, cpu_info):
     set_field_value(fields, 'cpu_speed', cpu_info['hz_actual'])
     set_field_value(fields, 'cpu_brand', cpu_info['brand'])
 
-def worker_update_callback(x, y, index, node_name, cpu, memory, temp, cpu_info):
-    global terminal, lock
+def node_update_proc(x, y, index, node, is_restart, display_queue, is_active_queue):
 
-    with lock:
-        fill_worker_stats(fields, index, node_name, cpu, memory, temp, cpu_info)
-        with terminal.location(x, y):
-            print(generate_line_stats(fields))
+    display_queue.put([x, y, f'{index:4} starting node {node.name}' + (' ' * 130)])
+
+    worker = Worker(node, NODE_STATS_WORKER_PATH, NODE_STATS_APP_NAME, NODE_STATS_PORT)
+    if not worker.startup(is_restart):
+        display_queue.put([x, y, f'cannot connect to node {node.name}'])
+
+    while is_active_queue.empty():
+        cpu = worker.connection.root.get_cpu()
+        memory = worker.connection.root.get_virtual_memory()
+        try:
+            temp = worker.connection.root.get_temperatures()
+        except:
+            temp = 0.0
+        cpu_info = worker.connection.root.get_cpu_info()
+        fill_worker_stats(fields, index, node.name, cpu, memory, temp, cpu_info)
+
+        display_queue.put([x, y, generate_line_stats(fields)])
+        time.sleep(1)
+
+def local_update_proc(x, y, index, controller, display_queue, is_active_queue):
+
+    while is_active_queue.empty():
+        fill_local_stats(fields, index, controller)
+        display_queue.put([x, y, generate_line_stats(fields)])
+        time.sleep(1)
 
 def show_size_as_text(size):
     """
@@ -221,71 +243,44 @@ def main():
         return
 
     terminal = Terminal()
-
-    workers = []
-    results = []
+    display_queue = Queue()
+    is_active_queue = Queue()
+    proc_list = []
+    index = 0
     x = 0
     y = terminal.height - len(cluster.nodes.keys())  - 3
     with terminal.location(x, y):
         print(generate_line_header(fields))
+    y += 1
 
-    y += 2
-    index = 1
+    proc = Process(target=local_update_proc, args=(x, y, index, cluster.controller, display_queue, is_active_queue))
+    proc.start()
+    proc_list.append(proc)
+    y += 1
+    index += 1
     for node_name, node in cluster.nodes.items():
-        worker = Worker(node, NODE_STATS_WORKER_PATH, NODE_STATS_APP_NAME, NODE_STATS_PORT)
-        if not worker.startup(args.restart):
-            print(f'cannot connect to node {node.name}')
-            return
-        # worker_update = rpyc.async_(worker.connection.root.update_start)
-        bgsrv = rpyc.BgServingThread(worker.connection)
-        update = worker.connection.root.update(x, y, index, worker.node.name, worker_update_callback)
-        workers.append({
-            'worker': worker,
-            'update': update
-        })
+        proc = Process(target=node_update_proc, args=(x, y, index, node, args.restart, display_queue, is_active_queue))
+        proc.start()
+        proc_list.append(proc)
         y += 1
         index += 1
 
     while True:
-        y = terminal.height - len(workers)  - 2
 
-        # with terminal.location(x, y):
-        #     print(generate_line_header(fields))
-
-        # y += 1
-        index = 0
-        with lock:
-            fill_local_stats(fields, index, cluster.controller)
-
-            with terminal.location(x, y):
-                print(generate_line_stats(fields))
-        index += 1
-        y += 1
-
-        """
-        for worker in workers:
-            cpu = worker.connection.root.get_cpu()
-            memory = worker.connection.root.get_virtual_memory()
-            try:
-                temp = worker.connection.root.get_temperatures()
-            except:
-                temp = 0.0
-            cpu_info = worker.connection.root.get_cpu_info()
-            fill_worker_stats(fields, index, cpu, memory, temp, cpu_info)
-
-            with term.location(x, y):
-                print(generate_line_stats(fields))
-            index += 1
-            y += 1
-        """
+        while not display_queue.empty():
+            item = display_queue.get()
+            with terminal.location(item[0], item[1]):
+                print(item[2])
             
         with terminal.cbreak(), terminal.hidden_cursor():
-            inp = terminal.inkey(1)
+            inp = terminal.inkey(0.5)
             if inp:
                 break
+           
+    is_active_queue.put('exit')
+    for proc in proc_list:
+        proc.join()
 
-    for item in workers:
-        item['worker'].connection.root.update_stop()
 
 if __name__ == '__main__':
     main()

@@ -42,6 +42,7 @@ class Worker:
             self._connection = rpyc.connect(self._node.hostname, self._port)
             logger.debug(f'connected {self._node.hostname}')
         except Exception as e:
+            logger.debug(f'connection error: {e}')
             self._connection = None
         return self._connection
 
@@ -53,7 +54,7 @@ class Worker:
     def startup(self, is_restart=False, connection_timeout=CONNECTION_TIMEOUT):
         connection = self.connect()
         if connection and is_restart:
-            logger.debug(f'closing {self._node.hostname}');
+            logger.debug(f'need to do restart so closing {self._node.hostname}');
             try:
                 self.connection.root.do_close()
                 self.close()
@@ -68,9 +69,11 @@ class Worker:
             logger.debug(f'starting worker {self._node.hostname}...')
             proc = self.start()
             timeout = time.time() + connection_timeout
+            logger.debug('waiting for connection')
             while timeout > time.time():
                 connection = self.connect()
                 if connection:
+                    logger.debug('connected')
                     break
             proc.kill()
         return connection 
