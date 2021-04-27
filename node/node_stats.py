@@ -31,7 +31,7 @@ logger = logging.getLogger(__name__)
 terminal = None
 lock = Lock()
 
-fields = {
+DISPLAY_FIELDS = {
     'index' : {
         'title': '#',
         'width': 4,
@@ -156,7 +156,7 @@ def fill_worker_stats(fields, index, node_name, cpu, memory, temp, cpu_info):
     set_field_value(fields, 'cpu_speed', cpu_info['hz_actual'])
     set_field_value(fields, 'cpu_brand', cpu_info['brand'])
 
-def node_update_proc(x, y, index, node, is_restart, display_queue, is_active_queue):
+def node_update_proc(x, y, index, node, is_restart, display_queue, control_queue):
 
     display_queue.put([x, y, f'{index:4} starting node {node.name}' + (' ' * 130)])
 
@@ -164,7 +164,8 @@ def node_update_proc(x, y, index, node, is_restart, display_queue, is_active_que
     if not worker.startup(is_restart):
         display_queue.put([x, y, f'cannot connect to node {node.name}'])
 
-    while is_active_queue.empty():
+    fields = DISPLAY_FIELDS
+    while control_queue.empty():
         cpu = worker.connection.root.get_cpu()
         memory = worker.connection.root.get_virtual_memory()
         try:
@@ -178,7 +179,7 @@ def node_update_proc(x, y, index, node, is_restart, display_queue, is_active_que
         time.sleep(1)
 
 def local_update_proc(x, y, index, controller, display_queue, is_active_queue):
-
+    fields = DISPLAY_FIELDS
     while is_active_queue.empty():
         fill_local_stats(fields, index, controller)
         display_queue.put([x, y, generate_line_stats(fields)])
@@ -244,7 +245,8 @@ def main():
 
     terminal = Terminal()
     display_queue = Queue()
-    is_active_queue = Queue()
+    control_queue = Queue()
+    fields = DISPLAY_FIELDS
     proc_list = []
     index = 0
     x = 0
@@ -253,13 +255,13 @@ def main():
         print(generate_line_header(fields))
     y += 1
 
-    proc = Process(target=local_update_proc, args=(x, y, index, cluster.controller, display_queue, is_active_queue))
+    proc = Process(target=local_update_proc, args=(x, y, index, cluster.controller, display_queue, control_queue))
     proc.start()
     proc_list.append(proc)
     y += 1
     index += 1
     for node_name, node in cluster.nodes.items():
-        proc = Process(target=node_update_proc, args=(x, y, index, node, args.restart, display_queue, is_active_queue))
+        proc = Process(target=node_update_proc, args=(x, y, index, node, args.restart, display_queue, control_queue))
         proc.start()
         proc_list.append(proc)
         y += 1
@@ -277,7 +279,7 @@ def main():
             if inp:
                 break
            
-    is_active_queue.put('exit')
+    control_queue.put('exit')
     for proc in proc_list:
         proc.join()
 
