@@ -19,7 +19,7 @@ class Cluster:
 
     def __init__(self):
         self._config = None
-        self._nodes = {}
+        self._nodes = []
         self._worker_path = None
         self._controller = None
 
@@ -38,11 +38,18 @@ class Cluster:
         return self._config
 
     def load_nodes(self):
-        self._nodes = {}
+        self._nodes = []
         index = 1
         for item in self.config['nodes']:
-            node = Node(index, item['name'], item['hostname'], item['username'], self.config['key_file'], self._worker_path) 
-            self.nodes[node.index] = node
+            node = Node(
+                index, 
+                item['name'], 
+                item['hostname'], 
+                item['username'], 
+                self.config['key_file'], 
+                self._worker_path
+            ) 
+            self.nodes.append(node)
             index += 1
 
     @property

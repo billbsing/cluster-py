@@ -78,6 +78,10 @@ DISPLAY_FIELDS = {
         'title': 'count',
         'width': 5
     },
+    # 'cpu_count_2': {
+    #     'title': 'count',
+    #     'width': 5
+    # },
     'cpu_speed': {
         'title': 'speed',
         'width': 15,
@@ -110,7 +114,6 @@ def generate_line_header(fields):
         line.append('{0:{format_field}}'.format(title, format_field=format_field))
     return ' '.join(line)
 
-
 def generate_line_stats(fields):
     line = []
     for name, item in fields.items():
@@ -136,10 +139,11 @@ def fill_local_stats(fields, index, controller):
     set_field_value(fields, 'cpu_arch', cpu_info['arch'])
     set_field_value(fields, 'cpu_bits', cpu_info['bits'])
     set_field_value(fields, 'cpu_count', cpu_info['count'])
+    # set_field_value(fields, 'cpu_count_2', os.cpu_count())
     set_field_value(fields, 'cpu_speed', cpu_info['hz_actual_friendly'])
     set_field_value(fields, 'cpu_brand', cpu_info['brand_raw'])
 
-def fill_worker_stats(fields, index, node_name, cpu, memory, temp, cpu_info):
+def fill_worker_stats(fields, index, node_name, cpu, cpu_count, memory, temp, cpu_info):
     set_field_value(fields, 'index', index)
     set_field_value(fields, 'node', node_name)
 
@@ -153,6 +157,7 @@ def fill_worker_stats(fields, index, node_name, cpu, memory, temp, cpu_info):
     set_field_value(fields, 'cpu_arch', cpu_info['arch'])
     set_field_value(fields, 'cpu_bits', cpu_info['bits'])
     set_field_value(fields, 'cpu_count', cpu_info['count'])
+    # set_field_value(fields, 'cpu_count_2', cpu_count)
     set_field_value(fields, 'cpu_speed', cpu_info['hz_actual'])
     set_field_value(fields, 'cpu_brand', cpu_info['brand'])
 
@@ -161,22 +166,25 @@ def node_update_proc(x, y, index, node, is_restart, display_queue, control_queue
     display_queue.put([x, y, f'{index:4} starting node {node.name}' + (' ' * 130)])
 
     worker = Worker(node, NODE_STATS_WORKER_PATH, NODE_STATS_APP_NAME, NODE_STATS_PORT)
-    if not worker.startup(is_restart):
+    connection = worker.startup(is_restart)
+    if not connection:
         display_queue.put([x, y, f'cannot connect to node {node.name}'])
 
     fields = DISPLAY_FIELDS
     while control_queue.empty():
-        cpu = worker.connection.root.get_cpu()
-        memory = worker.connection.root.get_virtual_memory()
+        cpu = connection.root.get_cpu()
+        cpu_count = connection.root.get_cpu_count()
+        memory = connection.root.get_virtual_memory()
         try:
-            temp = worker.connection.root.get_temperatures()
+            temp = connection.root.get_temperatures()
         except:
             temp = 0.0
-        cpu_info = worker.connection.root.get_cpu_info()
-        fill_worker_stats(fields, index, node.name, cpu, memory, temp, cpu_info)
+        cpu_info = connection.root.get_cpu_info()
+        fill_worker_stats(fields, index, node.name, cpu, cpu_count, memory, temp, cpu_info)
 
         display_queue.put([x, y, generate_line_stats(fields)])
         time.sleep(1)
+    connection.close()
 
 def local_update_proc(x, y, index, controller, display_queue, is_active_queue):
     fields = DISPLAY_FIELDS
@@ -250,9 +258,9 @@ def main():
     proc_list = []
     index = 0
     x = 0
-    y = terminal.height - len(cluster.nodes.keys())  - 3
+    y = terminal.height - len(cluster.nodes)  - 3
     with terminal.location(x, y):
-        print(generate_line_header(fields))
+        print(generate_line_header(fields).rstrip())
     y += 1
 
     proc = Process(target=local_update_proc, args=(x, y, index, cluster.controller, display_queue, control_queue))
@@ -260,7 +268,7 @@ def main():
     proc_list.append(proc)
     y += 1
     index += 1
-    for node_name, node in cluster.nodes.items():
+    for node in cluster.nodes:
         proc = Process(target=node_update_proc, args=(x, y, index, node, args.restart, display_queue, control_queue))
         proc.start()
         proc_list.append(proc)
@@ -272,7 +280,7 @@ def main():
         while not display_queue.empty():
             item = display_queue.get()
             with terminal.location(item[0], item[1]):
-                print(item[2])
+                print(item[2].rstrip())
             
         with terminal.cbreak(), terminal.hidden_cursor():
             inp = terminal.inkey(0.5)

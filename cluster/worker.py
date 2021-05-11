@@ -22,7 +22,6 @@ class Worker:
         self._path = path
         self._app_name = app_name
         self._port = port
-        self._connection = None
 
     def start(self):
         command = os.path.join(self._node.worker_path, self._app_name)
@@ -36,38 +35,34 @@ class Worker:
         proc = subprocess.Popen(line, stdout=subprocess.PIPE)
         return proc
 
-    def connect(self):
-        self._connection = None
+    def connect(self, config={}):
+        connection = None
         try:
-            self._connection = rpyc.connect(self._node.hostname, self._port)
+            connection = rpyc.connect(self._node.hostname, self._port, config=config)
             logger.debug(f'connected {self._node.hostname}')
         except Exception as e:
             logger.debug(f'connection error: {e}')
-            self._connection = None
-        return self._connection
-
-    def close(self):
-        if self._connection:
-            self._connection.close()
-        self._connection = None
+        return connection
 
     def startup(self, is_restart=False, connection_timeout=CONNECTION_TIMEOUT):
-        connection = self.connect()
-        if connection and is_restart:
+        proc = None
+        if is_restart:
             logger.debug(f'need to do restart so closing {self._node.hostname}');
             try:
-                self.connection.root.do_close()
-                self.close()
+                line = f'pkill -f {self._app_name}'
+                self._node.execute(line)
             except Exception as e:
-                pass
-            connection = None
+                logger.debug(f'close connection {e}')
 
-        if not connection:
             logger.debug(f'rsync worker path')
             result = self._node.sync(self._path)
             logger.debug(f'sync output: {result}')
+
+        connection = self.connect()
+        if not connection:
             logger.debug(f'starting worker {self._node.hostname}...')
             proc = self.start()
+
             timeout = time.time() + connection_timeout
             logger.debug('waiting for connection')
             while timeout > time.time():
@@ -75,7 +70,8 @@ class Worker:
                 if connection:
                     logger.debug('connected')
                     break
-            proc.kill()
+            if proc:
+                proc.kill()
         return connection 
 
     @property
@@ -93,10 +89,6 @@ class Worker:
     @property
     def port(self):
         return self._port
-
-    @property
-    def connection(self):
-        return self._connection
 
     def __str__(self):
         return f'{self._node}: {self._filename}:{self._port}'

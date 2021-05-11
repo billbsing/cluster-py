@@ -5,6 +5,9 @@ import os
 import subprocess
 import yaml
 
+from multiprocessing import Process
+
+
 from cluster import (
     Cluster,
     Worker
@@ -13,6 +16,24 @@ from cluster import (
 DEFAULT_CONFIG_FILENAME = 'cluster.conf'
 
 COMMAND_LIST = ['exec', 'sync', 'poweroff']
+
+def node_command(cluster, node, command, params):
+
+    if command == 'exec':
+        if not params:
+            print('you need to pass a command to execute')
+            return
+        result = node.execute(params[0])
+        print(f'{node}: exec {params[0]}')
+        print(result)
+    elif command == 'sync':
+        result = node.sync(cluster.worker_path)
+        print(f'{node}: rsync {cluster.worker_path}')
+        print(result)
+    elif command == 'poweroff':
+        result = node.execute('sudo poweroff')
+        print(f'{node}: exec sudo poweroff')
+        print(result)
 
 
 def main():
@@ -53,23 +74,20 @@ def main():
     if command not in COMMAND_LIST:
         print(f'unkown command "{args.command}"')
 
-    for node_name, node in cluster.nodes.items():
+    proc_list = []
+
+    for node in cluster.nodes:
         if node_count >= count and count > 0:
             break
         node_count += 1
         command = args.command.lower()
-        if command == 'exec':
-            if not args.params:
-                print('you need to pass a command to execute')
-                return
-            print(f'{node}: exec {args.params[0]}')
-            print(node.execute(args.params[0]))
-        elif command == 'sync':
-            print(f'{node}: rsync {cluster.worker_path}')
-            print(node.sync(cluster.worker_path))
-        elif command == 'poweroff':
-            print(f'{node}: exec sudo poweroff')
-            print(node.execute('sudo poweroff'))
+        proc = Process(target=node_command, args=(cluster, node, command, args.params))
+        proc_list.append(proc)
+        proc.start()
+
+
+    for proc in proc_list:
+        proc.join()
 
 if __name__ == '__main__':
     main()
